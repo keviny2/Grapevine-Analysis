@@ -1,0 +1,426 @@
+---
+title: The Effects of Heat Treatment on Grapevine Performance and Botrytis Disease
+author: "Kevin Yang, Xiaoxuan Liang, Zhong Zhuang"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+header-includes:
+- \usepackage{bbm}
+- \usepackage[utf8]{inputenc}
+- \usepackage{relsize}
+- \usepackage{graphicx}
+- \usepackage{graphics}
+- \usepackage[capposition=bottom]{floatrow}
+- \usepackage[font=small]{caption}
+- \usepackage{url}
+- \usepackage{dcolumn}
+- \captionsetup[table]{position=below}
+- \usepackage{placeins}
+---
+```{r load packages, echo=FALSE, results='hide',message=FALSE, warning=FALSE}
+library(readxl)
+library(MASS)
+library(formattable)
+library(data.table)
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(betareg)
+library(bootstrap)
+library(ggplot2)
+library(rlist)
+library(stargazer)
+library(gridExtra)
+library(grid)
+library(png)
+library(ggpubr)
+library(captioner)
+th <- theme(plot.title = element_text(hjust = 0.5))
+knitr::knit_hooks$set(plot = function(x, options)  {
+  paste0(knitr::hook_plot_tex(x, options), "\n\\FloatBarrier\n")
+})
+table_nums <- captioner(prefix = "Table")
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r load datasets, echo=FALSE, results='hide',message=FALSE, warning=FALSE}
+botrytis <- read_excel("C:/Users/kevin/OneDrive/Documents/STAT/STAT 450/Wine/data/TanjaVoegel_Botrytis_rawdata.xlsx")
+
+merlot <- read_excel("C:/Users/kevin/OneDrive/Documents/STAT/STAT 450/Wine/data/TanjaVoegel_Merlot_rawdata.xlsx")
+```
+
+```{r, echo=FALSE, results='hide',message=FALSE, warning=FALSE}
+## Botrytis
+botrytis <- botrytis %>% # now give codeable names
+ rename(cluster_per_vine = `clusters/vine`,
+                yield = `yield/vine in kg`,
+                weight = `av cluster weight/vine`,
+                bot_incidence = `botrytis incidence in %`,
+                bot_severity = `botrytis severty in %`,
+                shrivel_incidence = `shrivel incidence in %`,
+                shrivel_severity = `shrivel severty in %`,
+                compactness = `cluster compactness`) %>% 
+ mutate(bot_incidence = (bot_incidence/100 * (n() - 1) + 0.5) / n(),
+        shrivel_incidence = (shrivel_incidence/100 * (n() - 1) + 0.5) / n(),
+        bot_severity = (bot_severity/100 * (n() - 1) + 0.5) / n(),
+        shrivel_severity = (shrivel_severity/100 * (n() - 1) + 0.5) / n())
+
+heat <- botrytis[which(botrytis$treatment=="HeatNoBot"),]; heat
+none <- botrytis[which(botrytis$treatment=="NoHeatNoBot"),]; none
+bot <- botrytis[which(botrytis$treatment=="NoHeatBot"),]; bot
+botrytis_response_names <- list( # names to print in plot
+  "cluster_per_vine" = "Cluster per vine",
+  "yield" = "Yield per vine (kg)",
+  "weight" = "Avg. cluster weight per vine",
+  "bot_incidence" = "Botrytis incidence",
+  "bot_severity" = "Botrytis severity",
+  "shrivel_incidence" = "Shrivel incidence",
+  "shrivel_severity" = "Shrivel severity",
+  "compactness" = "Cluster compactness"
+)
+
+## Merlot
+merlot <- merlot %>% # now give codeable names
+ rename(greenness = `leafgreenness`,
+                veraison = `50% veraison`,
+                cluster_per_vine = `clusters/vine`,
+                yield_per_vine = `yield/vine in kg`,
+                av_cluster_weight = `av cluster weight/vine (in kg)`,
+                av_berry_weight = `av berry weight/vine (in g)`,
+                av_number = `av number of berries/cluster`,
+ )  %>% filter(veraison != "NA")
+
+heat <- merlot[which(merlot$treatment=="heat"),]; heat
+none <- merlot[which(merlot$treatment=="control"),]; none
+merlot_response_names <- list( # names to print in plot
+  "greenness" = "Leaf Greenness",
+  "veraison" = "50% veraison",
+  "cluster_per_vine" = "Cluster per vine",
+  "yield_per_vine" = "Yield/vine in kg",
+  "av_cluster_weight" = "Avg cluster weight/vine",
+  "av_berry_weight" = "Avg berry weight/vine",
+  "av_number" = "Avg # of berries/cluster",
+  "berryTA" = "Berry TA",
+  "berrypH" = "Berry pH",
+  "berryBrix" = "Berry Brix"
+)
+merlot_response_names_update <- c("Leaf Greenness", "50% Veraison", "Number of Grape Clusters/Vine", "Total Grapevine Yield/Vine", "Average Cluster Weight/Vine", "Average Number of Berries/Cluster", "Average Berry Weight/Vine", "Berry TA", "Berry pH", "Berry Brix")
+
+botrytis_labeller <- function(variable,value){
+  return(botrytis_response_names[value])
+}
+
+merlot_labeller <- function(variable,value){
+  return(merlot_response_names[value])
+}
+```
+
+\maketitle
+
+\section{Summary}
+In this study, two vineyards are examined. Agro-thermal heat treatment is applied to vines in a Merlot vineyard and agro-thermal heat treatment or an agro-chemical known as botryticide to vines in a Botrytis vineyard. Numerous variables are collected to determine the effectiveness of agro-thermal heat treatment on grapevine quality. ANOVA and Kruskal-Wallis tests are used in the analysis to accomplish this. The results do not provide evidence that agro-thermal heat treatment reduces botrytis, but do suggest that agro-thermal heat treatment increases 50% Veraison and decreases Average Berry Weight.
+
+
+\section{Introduction}
+Grapevine performance is essential in wine making. However, grape harvesters encounter many issues during the farming process that negatively affect grapevine performance. A prominent issue is the growth of a fungus called botrytis, commonly found on grape clusters and can cause dryness and premature cluster drop. In an attempt to minimize the usage of an agro-chemical called botryticide, alternative treatments are explored to combat the presence of botrytis on grape clusters. Applying agro-thermal heat treatment on grapevines has exhibited promising results, so an investigation on whether agro-thermal heat-treatment is a suitable alternative to botryticide seems appropriate. This statistical study compares the effectiveness of applying agro-thermal heat treatment and botryticide to grapevines. A One-way ANOVA model is created and a Kruskal-Wallis test is performed for each variable.
+
+\section{Exploratory Data Analysis}
+For the Merlot study, the experimental design began with sectioning the vineyard into 4 row chunks called blocks. Then within each block, random treatments were applied to rows of 60-80 vines two at a time (See Figure 6 in Appendix). Treatments consisted of either applying heat or nothing to the vines. After the growing season, the client walked down one row in each row-pair with closed eyes and arbitrarily selected 5 vines, giving a total of 60 vines. This procedure may not produce truly independent samples due to human bias. However, the human bias should be negligible and not harm the analysis. For each vine, 7 variables were obtained. Refer to Table 1 below for a list of variables and relevant statistics.\
+
+For the Botrytis study, the experimental design was very similar to that of the Merlot study (See Figure 6 in Appendix). The vineyard was sectioned into 6 row chunks called blocks. Then within each block, random treatments were applied to rows of 60-80 vines two at a time and 4 vines were selected from each row-pair. Treatments consisted of either applying heat, botryticide, or nothing to the vines. For each vine, 8 variables were collected in the Botrytis study. Refer to Table 2 below for a list of variables and relevant statistics.
+```{r echo=FALSE, results='hide'}
+table_nums(name="merlot.dat", caption = "List of variables for Merlot study with relevant statistics")
+```
+
+```{r out.height='80%', out.width='80%',fig.align='center'}
+mer.mean <- c(40.25,20.02,18.62,2.82,0.15,108.53,1.39,7.37,3.3,24.4)
+mer.sd <- c(2.14,4.98,4.89,1.17,0.05,31.34,0.15,1.02,0.06,0.74)
+df <- cbind(merlot_response_names_update, mer.mean,mer.sd)
+df <- as.data.frame(df)
+first.step <- lapply(df, unlist) 
+second.step <- as.data.frame(first.step, stringsAsFactors = F) 
+colnames(second.step) <- c("Variable Name", "Mean", "Std. Dev")
+ggtexttable(second.step, rows = NULL, theme = ttheme("mBlue"))
+```
+\begin{center}
+\hspace{2cm}`r table_nums("merlot.dat")`
+\newline
+\newline
+\end{center}
+
+```{r echo=FALSE, results='hide'}
+table_nums(name="bot.dat", caption = "List of variables for Botrytis study with relevant statistics")
+```
+
+```{r out.height='80%', out.width='80%',fig.align='center'}
+mer.mean <- c(32.6,6.2,0.19,0.11,0.13,0.01,0.02,1.24)
+mer.sd <- c(8.2,2.14,0.05,0.13,0.99,0.02,0.02,0.18)
+df <- cbind(botrytis_response_names, mer.mean,mer.sd)
+df[3,1] = "   Average Cluster Weight/Vine   "
+df[2,1] = "Yield/Vine (kg)"
+df[1,1] = "Cluster/Vine"
+df <- as.data.frame(df)
+first.step <- lapply(df, unlist) 
+second.step <- as.data.frame(first.step, stringsAsFactors = F) 
+colnames(second.step) <- c("Variable Name", "Mean", "Std. Dev")
+ggtexttable(second.step, rows = NULL, theme = ttheme("mBlue"))
+```
+\begin{center}
+\hspace{2cm}`r table_nums("bot.dat")`
+\newline
+\newline
+\end{center}
+\newpage
+
+Figure 1 below shows boxplots for a subset of variables in the Merlot and Botrytis studies. Apart from 50% Veraison, the variables appear to have an equal spread around the median (the black line), suggesting they are normally distributed and have equal variance across treatments. However, the Q-Q plots for these variables (see Figures 4 & 5 in Appendix) provide reasons to believe these variables are not normally distributed. The Bartlett test results indicate that all these variables except Botrytis Severity have equal variance across treatments. P-values from the Bartlett test for each variable can be found in Tables 9 & 10 in the Appendix.\
+\
+The boxplots in Figure 1 also reveal the presence of outliers. Outliers may lead to biased analysis results, because mean and standard deviation are sensitive to outliers. Also, the type of treatment appears to have a significant effect on 50% Veraison and Average Berry Weight. All boxplots can be found in Figures 2 and 3 in the Appendix.\
+\
+\
+\
+\
+```{r echo=FALSE, fig.cap="Boxplots for 50\\% Veraison, Average Berry Weight, Shrivel Incidence, Shrivel Severity, Botrytis Incidence, and Botrytis Severity", out.height='80%', out.width='80%'}
+veraison_box <- ggplot(merlot, aes(x=factor(treatment), y=veraison, fill=factor(treatment))) + labs(x="Treatment", y="50% Veraison (Mer)") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none")
+
+av_berry_weight_box <- ggplot(merlot, aes(x=factor(treatment), y=av_berry_weight, fill=factor(treatment))) + labs(x="Treatment", y="Avg. Berry Weight (Mer)") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none")
+
+shriv_incid_box <- ggplot(botrytis, aes(x=factor(treatment), y=shrivel_incidence, fill=factor(treatment))) + labs(x="Treatment", y="Shrivel Incidence (Bot)") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none")
+
+shriv_sev_box <- ggplot(botrytis, aes(x=factor(treatment), y=shrivel_severity, fill=factor(treatment))) + labs(x="Treatment", y="Shrivel Severity (Bot)") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none")
+
+bot_incid_box <- ggplot(botrytis, aes(x=factor(treatment), y=bot_incidence, fill=factor(treatment))) + labs(x="Treatment", y="Botrytis Incidence (Bot)") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none")
+
+bot_sev_box <- ggplot(botrytis, aes(x=factor(treatment), y=bot_severity, fill=factor(treatment))) + labs(x="Treatment", y="Botrytis Severity (Bot)") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none")
+
+grid.arrange(veraison_box, av_berry_weight_box, shriv_incid_box, shriv_sev_box, bot_incid_box, bot_sev_box, ncol = 3)
+```
+\newpage
+\section{Statistical Models}
+The treatment types in this study (heat, botryticide, no heat) are natural categories. The One-way ANOVA is a common statistical method used to compare three or more groups. This method is a reasonable choice to investigate whether agro-thermal heat treatment  has a significant effect on continuous responses in the study. Although the One-way ANOVA is a powerful method, it is less reliable if outliers are present in the data, or if certain assumptions such as normality or equal variance across groups are not met.\
+\
+Unfortunately, outliers are present in the data, and the normality and variance assumptions are questionable. A One-way ANOVA is performed both on the original dataset with outliers and on the dataset with outliers removed. The One-way ANOVA is not too sensitive to normality assumptions, so the lack of normality in some variables is not a great concern. The One-way ANOVA assumes equal variance across treatments which appears consistent for most variables.\
+\
+A Kruskal-Wallis test is performed in addition to the One-way ANOVA. Like the One-way ANOVA, the Kruskal-Wallis test compares similarities between categories. However, this test is not heavily affected by the presence of outliers and does not require the normality or equal variance assumptions. This makes the Kruskal-Wallis test a good alternative for the One-way ANOVA. Unfortunately, the Kruskal-Wallis test is less powerful than the One-way ANOVA because it uses ranks and not the original data. Both methods are used in the analysis and results are compared.\
+
+\section{Analysis Results}
+The analysis indicates that agro-thermal heat treatment increases 50% Veraison and decreases Average Berry Weight in the Merlot study. However, agro-thermal heat treatment does not appear to make a significant difference for the other variables.\
+\
+The p-values from the One-way ANOVA for variables in the Merlot study are shown in Table 3 below. The p-values corresponding to 50% Veraison and Average Berry Weight are very small when outliers are present in the dataset. When outliers are removed, the p-value associated with 50% Veraison changes by a negligible amount, but the p-value associated with Average Berry Weight increases above 0.05. The outliers clearly have an effect on the results of the One-way ANOVA.\
+\
+
+```{r echo=FALSE, results='hide'}
+table_nums(name="anova", caption = "P-values from One-way ANOVA for each variable separately in the Merlot study, with and without outliers present in the dataset")
+```
+
+```{r echo=FALSE, fig.align='center', fig.pos = "!h", results = 'asis', out.height='60%', out.width='60%'}
+ knitr::include_graphics("./figures/anova_mer.png")
+```
+\begin{center}
+`r table_nums("anova")`
+\newline
+\newline
+\end{center}
+\
+\
+A Kruskal-Wallis test is also done on each variable in the Merlot study, and the p-values are shown in Table 4 below.\
+\
+```{r echo=FALSE, results='hide'}
+table_nums(name="kruskal", caption = "P-values obtained by performing a Kruskal-Wallis test for each variable separately in the Merlot study")
+```
+
+```{r echo=FALSE, fig.align='center', fig.pos = "!h", results = 'asis', out.height='60%', out.width='60%'}
+ knitr::include_graphics("./figures/kruskal_mer.png")
+```
+\begin{center}
+`r table_nums("kruskal")`
+\newline
+\newline
+\end{center}
+\
+\
+The One-way ANOVA and Kruskal-Wallis test both produce a p-value below 0.05 for 50% Veraison. This indicates that agro-thermal heat treatment has a significant effect on 50% Veraison. Although both tests produce p-values slightly larger than 0.05 for Average Berry Weight, they are quite low relative to the other variables. This indicates agro-thermal heat treatment also has an effect on Average Berry Weight. The results also indicate that agro-thermal heat treatment might affect Leaf Greenness and Number of Clusters per Vine because of their smaller p-values. The One-way ANOVA produces similar results to the Kruskal-Wallis test, indicating its' robustness to the assumptions for this dataset.
+\
+\
+The side-by-side boxplots in Figure 1 above suggest that agro-thermal heat treatment increases 50% Veraison and decreases Average Berry Weight. It is uncertain why agro-thermal heat treatment has this particular effect on 50% Veraison, but further research can be done to investigate this phenomenon. On the other hand, agro-thermal heat treatment likely reduces water content in berries, effectively reducing Average Berry Weight. Further research can be done to verify this hypothesis.\
+\
+Tables 5 and 6 in the Appendix display the p-values from the One-way ANOVA and the Kruskal-Wallis test for variables in the Botrytis study. All the p-values are relatively large, which surprisingly suggests that neither agro-thermal heat treatment nor botryticide is effective in reducing botrytis. The client has brought to our attention that botrytis levels were especially low during the harvest season when these measurements were collected. This could explain the apparent ineffectiveness of botryticide and agro-thermal heat in reducing botrytis.\
+\newpage
+\section{Conclusions}
+The analysis indicates that agro-thermal heat treatment increases 50% Veraison and decreases Average Berry Weight, but it does not provide enough evidence that agro-thermal heat treatment reduces botrytis. A limitation of the analysis is that block factors are ignored to maximize the limited number of data points in the dataset. A sample size calculation is performed for future studies. The calculation indicates that a sample size of 30 per treatment is sufficient to obtain 80% power. Table 7 in the Appendix contains more sample sizes for different levels of power with different assumed desirable true mean differences. Details of the sample size calculation can also be found in the Appendix.\
+
+Other areas of future exploration include 1) determining the effect of agro-thermal heat treatment in reducing botrytis; 2) investigating the effect agro-thermal heat treatment appears to have on 50% Veraison and Average Berry Weight; 3) investigating the potential effect agro-thermal heat treatment may have on Leaf Greenness and Number of Clusters per Vine; 4) using a random effects model in the analysis to address block factors and time intervals between harvest seasons.
+
+\section{References}
+\begin{itemize}
+\item 
+\textbf{Kruskal-wallis test}: STAT 300 Lecture Notes
+\item 
+\textbf{Sample Size Calculation}: STAT 536 Lecture Notes (Prof. Lang)
+\end{itemize}
+\newpage
+\section{Appendix}
+
+```{r out.width='65%', out.height='65%', fig.cap='Boxplots for variables in the Merlot study'}
+av_berry_weight_box <- ggplot(merlot, aes(x=factor(treatment), y=av_berry_weight, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Avg. Berry Wt.")
+
+av_cluster_weight_box <- ggplot(merlot, aes(x=factor(treatment), y=av_cluster_weight, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Avg. Clust. Wt.")
+
+av_num_berries_box <- ggplot(merlot, aes(x=factor(treatment), y=av_number, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Avg. # Berries")
+
+berry_brix_box <- ggplot(merlot, aes(x=factor(treatment), y=berryBrix, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Berry Brix")
+
+berry_ph_box <- ggplot(merlot, aes(x=factor(treatment), y=berrypH, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Berry pH")
+
+berry_ta_box <- ggplot(merlot, aes(x=factor(treatment), y=berryTA, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Berry TA")
+
+cluster_per_vine_box <- ggplot(merlot, aes(x=factor(treatment), y=cluster_per_vine, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Cluster per Vine")
+
+leaf_greenness_box <- ggplot(merlot, aes(x=factor(treatment), y=greenness, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Leaf Greenness")
+
+veraison_box <- ggplot(merlot, aes(x=factor(treatment), y=veraison, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("50% Veraison")
+
+yield_per_vine_box <- ggplot(merlot, aes(x=factor(treatment), y=yield_per_vine, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Yield per Vine")
+
+grid.arrange(av_berry_weight_box,av_cluster_weight_box,av_num_berries_box,berry_brix_box,berry_ph_box,berry_ta_box,cluster_per_vine_box,leaf_greenness_box,veraison_box,yield_per_vine_box, ncol = 4)
+```
+
+```{r out.width='65%', out.height='65%',fig.cap='Boxplots for variables in the Botrytis study'}
+bot_incidence_box <- ggplot(botrytis, aes(x=factor(treatment), y=bot_incidence, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Bot. Incidence")
+
+bot_severity_box <- ggplot(botrytis, aes(x=factor(treatment), y=bot_severity, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Bot. Severity")
+
+clust_per_vine_box <- ggplot(botrytis, aes(x=factor(treatment), y=cluster_per_vine, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Cluster per Vine")
+
+clust_compact_box <- ggplot(botrytis, aes(x=factor(treatment), y=compactness, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Cluster Compactness")
+
+shrivel_incidence_box <- ggplot(botrytis, aes(x=factor(treatment), y=shrivel_incidence, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Shrivel Incidence")
+
+shrivel_severity_box <- ggplot(botrytis, aes(x=factor(treatment), y=shrivel_severity, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Shrivel Severity")
+
+avg_clust_weight_box <- ggplot(botrytis, aes(x=factor(treatment), y=weight, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Avg. Clust. Wt. per Vine")
+
+yield_per_vine_box <- ggplot(botrytis, aes(x=factor(treatment), y=yield, fill=factor(treatment))) + labs(x="Treatment", y="") + scale_x_discrete(labels = c("Heat", "Bot.", "No Heat")) + geom_boxplot() + theme(legend.position = "none", plot.title = element_text(size=10,face="bold",hjust = 0.5)) + ggtitle("Yield per Vine (kg)")
+
+grid.arrange(bot_incidence_box,bot_severity_box,clust_per_vine_box,clust_compact_box,shrivel_incidence_box,shrivel_severity_box,avg_clust_weight_box,yield_per_vine_box, ncol = 3)
+```
+
+
+```{r echo=FALSE, results='hide'}
+table_nums(name="kruskal_bot", caption = "P-values obtained by performing a Kruskal-Wallis test for each variable separately in the Botrytis study")
+```
+
+```{r echo=FALSE, fig.align='center', fig.pos = "!h", results = 'asis', out.height='75%', out.width='75%'}
+ knitr::include_graphics("./figures/kruskal_bot.png")
+```
+\begin{center}
+`r table_nums("kruskal_bot")`
+\newline
+\newline
+\end{center}
+```{r echo=FALSE, results='hide'}
+table_nums(name="anova_bot", caption = "P-values from One-way ANOVA for each variable separately in the Botrytis study, with and without outliers present in the dataset")
+```
+
+```{r echo=FALSE, fig.align='center', fig.pos = "!h", results = 'asis', out.height='75%', out.width='75%'}
+ knitr::include_graphics("./figures/anova_bot.png")
+```
+\begin{center}
+`r table_nums("anova_bot")`
+\newline
+\newline
+\end{center}
+
+```{r echo=FALSE, fig.cap="Q-Q plot for 50\\% Veraison and Average Berry Weight in the Merlot study. Straight diagonal lines indicate that the variable is normally distributed", out.height='50%', out.width='50%'}
+p1 <- ggplot(merlot, aes(sample = veraison, colour = factor(treatment))) +
+  labs(x="Sample", y="Theoretical", color = "Treatment", title = "50% Veraison") +
+  scale_color_discrete(labels = c("No heat", "Heat")) +
+  stat_qq() +
+  stat_qq_line()
+p2 <- ggplot(merlot, aes(sample = av_berry_weight, colour = factor(treatment))) +
+  labs(x="Sample", y="Theoretical", color = "Treatment", title = "Average Berry Weight") +
+  scale_color_discrete(labels = c("No heat", "Heat")) +
+  stat_qq() +
+  stat_qq_line()
+p3 <- ggplot(botrytis, aes(sample = shrivel_incidence, colour = factor(treatment))) +
+  labs(x="Sample", y="Theoretical", color = "Treatment", title = "Shrivel Incidence") +
+  scale_color_discrete(labels = c("No heat", "Botryticide", "Heat")) +
+  stat_qq() +
+  stat_qq_line()
+p4 <- ggplot(botrytis, aes(sample = shrivel_severity, colour = factor(treatment))) +
+  labs(x="Sample", y="Theoretical", color = "Treatment", title = "Shrivel Severity") +
+  scale_color_discrete(labels = c("No heat", "Botryticide", "Heat")) +
+  stat_qq() +
+  stat_qq_line()
+p5 <- ggplot(botrytis, aes(sample = bot_incidence, colour = factor(treatment))) +
+  labs(x="Sample", y="Theoretical", color = "Treatment", title = "Botrytis Incidence")+
+  scale_color_discrete(labels = c("No heat", "Botryticide", "Heat")) +
+  stat_qq() +
+  stat_qq_line()
+p6 <- ggplot(botrytis, aes(sample = bot_severity, colour = factor(treatment))) +
+  labs(x="Sample", y="Theoretical", color = "Treatment", title = "Botrytis Severity") +
+  scale_color_discrete(labels = c("No heat", "Botryticide", "Heat")) +
+  stat_qq() +
+  stat_qq_line()
+grid.arrange(p1,p2,ncol=2)
+```
+
+```{r echo=FALSE, fig.cap="Q-Q plot for Shrivel Incidence, Shrivel Severity, Botrytis Incidence, and Botrytis Severity in the Botrytis study. Straight diagonal lines indicate that the variable is normally distributed", out.height='80%', out.width='80%'}
+grid.arrange(p3,p4,p5,p6,ncol=2)
+```
+
+```{r, echo=FALSE, fig.cap="Experimental Design for Merlot (left) and Botrytis (right) study", fig.height=2}
+merlot_block <-  rasterGrob(as.raster(readPNG("./figures/blockDiagram2.png")))
+botrytis_block <-  rasterGrob(as.raster(readPNG("./figures/blockDiagram.png")))
+grid.arrange(merlot_block, botrytis_block, ncol = 2)
+```
+\newpage
+Sample size calculations are done for the variables Average Berry Weight and 50% Veraison. A two-sided power test is performed to determine the sample size needed within each treatment to achieve 80% power. A general description for calculating the sample size is as follows:\
+
+•	Set a desirable mean difference between the two treatments.\
+•	Set a common standard deviation, assuming equal variance across treatments.\
+•	Set the significance level at 0.05\
+
+```{r, echo=FALSE}
+p1 <-  rasterGrob(as.raster(readPNG("./figures/power1.png")))
+p2 <-  rasterGrob(as.raster(readPNG("./figures/power2.png")))
+grid.arrange(p2, p1, ncol = 2)
+```
+
+```{r echo=FALSE, results='hide'}
+table_nums(name="dummy1", caption = "")
+```
+
+```{r echo=FALSE, results='hide'}
+table_nums(name="dummy2", caption = "")
+```
+
+```{r echo=FALSE, results='hide'}
+table_nums(name="mer_bart", caption = "P-values obtained from Bartlett test for equal variance across groups for Merlot study")
+```
+
+```{r echo=FALSE, fig.align='center', fig.pos = "!h", results = 'asis', out.height='60%', out.width='60%'}
+ knitr::include_graphics("./figures/mer.bart.png")
+```
+\begin{center}
+`r table_nums("mer_bart")`
+\newline
+\newline
+\end{center}
+
+```{r echo=FALSE, results='hide'}
+table_nums(name="bot_bart", caption = "P-values obtained from Bartlett test for equal variance across groups for Botrytis study")
+```
+
+```{r echo=FALSE, fig.align='center', fig.pos = "!h", results = 'asis', out.height='60%', out.width='60%'}
+ knitr::include_graphics("./figures/bot.bart.png")
+```
+\begin{center}
+`r table_nums("bot_bart")`
+\newline
+\newline
+\end{center}
+
